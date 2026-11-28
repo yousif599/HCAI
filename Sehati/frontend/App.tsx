@@ -13,6 +13,7 @@ import { PatientGuideView } from './components/PatientGuideView';
 import { AppearanceModal } from './components/AppearanceModal';
 import { OnboardingGuideModal } from './components/OnboardingGuideModal';
 import { InteractiveGuidedTour } from './components/InteractiveGuidedTour';
+import { ShortcutTooltip } from './components/ShortcutTooltip';
 import {
   API_TIMEOUT_MS,
   ChatMessage,
@@ -77,6 +78,11 @@ export default function App() {
   });
   const [guidedTourStep, setGuidedTourStep] = useState<number>(0);
   const [tourDraft, setTourDraft] = useState<{ text: string; seq: number } | null>(null);
+  const [searchFocusSeq, setSearchFocusSeq] = useState(0);
+  const [focusInputSeq, setFocusInputSeq] = useState(0);
+  const [toggleVoiceSeq, setToggleVoiceSeq] = useState(0);
+  const [renameTrigger, setRenameTrigger] = useState<{ sessionId: string; seq: number } | null>(null);
+  const [deleteTrigger, setDeleteTrigger] = useState<{ sessionId: string; seq: number } | null>(null);
   const [mountedTabs, setMountedTabs] = useState<{ emergency: boolean; guide: boolean }>({
     emergency: false,
     guide: false,
@@ -252,10 +258,6 @@ export default function App() {
         const valid = parsed.filter((s) => Array.isArray(s.messages) && s.messages.length > 0);
         if (valid.length > 0) {
           setSessions(valid);
-          const latest = valid[0];
-          selectCurrentSessionId(latest.id);
-          setMessages(latest.messages);
-          return;
         }
       }
     } catch (e) {
@@ -531,6 +533,42 @@ export default function App() {
       }
     }
   };
+
+  const handleRenameSession = useCallback((id: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    setSessions((prev) => {
+      const updated = prev.map((s) =>
+        s.id === id ? { ...s, title: trimmed } : s
+      );
+      try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.error('Error saving chat history:', err);
+      }
+      return updated;
+    });
+  }, []);
+
+  const handleTogglePinSession = useCallback((id: string) => {
+    setSessions((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id !== id) return s;
+        const nextPinned = !s.pinned;
+        return {
+          ...s,
+          pinned: nextPinned,
+          pinnedAt: nextPinned ? Date.now() : undefined,
+        };
+      });
+      try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.error('Error saving chat history:', err);
+      }
+      return updated;
+    });
+  }, []);
 
   const handleClearAllSessions = () => {
     abortAllSessionRequests();
@@ -1000,6 +1038,167 @@ export default function App() {
     );
   };
 
+  const handleMessageFeedback = useCallback(
+    (messageId: string, feedback: 'good' | 'bad' | null) => {
+      const activeSessionId = currentSessionIdRef.current;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, feedback } : m))
+      );
+      if (!activeSessionId) return;
+      setSessions((prev) => {
+        const updated = prev.map((s) =>
+          s.id === activeSessionId
+            ? {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === messageId ? { ...m, feedback } : m
+                ),
+              }
+            : s
+        );
+        try {
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+        } catch (err) {
+          console.error('Error saving message feedback:', err);
+        }
+        return updated;
+      });
+    },
+    []
+  );
+
+  const shortcutHandlersRef = useRef<{
+    onNewChat: () => void;
+    onToggleSidebar: () => void;
+    onOpenSearch: () => void;
+    onFocusPrompt: () => void;
+    onToggleVoice: () => void;
+    onDeleteActiveChat: () => void;
+    onRenameActiveChat: () => void;
+    onPinActiveChat: () => void;
+    hasModalOpen: boolean;
+  }>({
+    onNewChat: () => {},
+    onToggleSidebar: () => {},
+    onOpenSearch: () => {},
+    onFocusPrompt: () => {},
+    onToggleVoice: () => {},
+    onDeleteActiveChat: () => {},
+    onRenameActiveChat: () => {},
+    onPinActiveChat: () => {},
+    hasModalOpen: false,
+  });
+
+  shortcutHandlersRef.current = {
+    onNewChat: handleNewChat,
+    onToggleSidebar: () => handleSetIsSidebarOpen((prev) => !prev),
+    onOpenSearch: () => {
+      handleSetIsSidebarOpen(true);
+      setSearchFocusSeq((n) => n + 1);
+    },
+    onFocusPrompt: () => {
+      setActiveTab('chat');
+      setFocusInputSeq((n) => n + 1);
+    },
+    onToggleVoice: () => {
+      setActiveTab('chat');
+      setToggleVoiceSeq((n) => n + 1);
+    },
+    onDeleteActiveChat: () => {
+      const activeId = currentSessionIdRef.current;
+      if (activeId && sessions.some((s) => s.id === activeId)) {
+        setDeleteTrigger({ sessionId: activeId, seq: Date.now() });
+      }
+    },
+    onRenameActiveChat: () => {
+      const activeId = currentSessionIdRef.current;
+      if (activeId && sessions.some((s) => s.id === activeId)) {
+        handleSetIsSidebarOpen(true);
+        setRenameTrigger({ sessionId: activeId, seq: Date.now() });
+      }
+    },
+    onPinActiveChat: () => {
+      const activeId = currentSessionIdRef.current;
+      if (activeId && sessions.some((s) => s.id === activeId)) {
+        handleTogglePinSession(activeId);
+      }
+    },
+    hasModalOpen: isAppearanceModalOpen || isTipsModalOpen || isGuidedTourOpen,
+  };
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (target.isContentEditable) return true;
+      return Boolean(target.closest('[contenteditable="true"]'));
+    };
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const handlers = shortcutHandlersRef.current;
+      const mod = e.ctrlKey || e.metaKey;
+      const code = e.code;
+      const keyLower = e.key.toLowerCase();
+
+      // Modifier shortcuts work globally (including while focused in chat input)
+      if (mod && e.shiftKey && !e.altKey && (code === 'KeyO' || keyLower === 'o')) {
+        e.preventDefault();
+        handlers.onNewChat();
+        return;
+      }
+
+      if (mod && !e.shiftKey && !e.altKey && (code === 'KeyB' || keyLower === 'b')) {
+        e.preventDefault();
+        handlers.onToggleSidebar();
+        return;
+      }
+
+      if (mod && e.shiftKey && !e.altKey && (code === 'KeyK' || keyLower === 'k')) {
+        e.preventDefault();
+        handlers.onOpenSearch();
+        return;
+      }
+
+      // Single-key shortcuts are ignored when typing, holding modifiers, or inside modals
+      if (mod || e.altKey || e.shiftKey || handlers.hasModalOpen || isEditableTarget(e.target)) {
+        return;
+      }
+
+      if (code === 'Backslash' || e.key === '\\') {
+        e.preventDefault();
+        handlers.onFocusPrompt();
+        return;
+      }
+
+      if (code === 'KeyV' || keyLower === 'v') {
+        e.preventDefault();
+        handlers.onToggleVoice();
+        return;
+      }
+
+      if (code === 'KeyD' || keyLower === 'd') {
+        e.preventDefault();
+        handlers.onDeleteActiveChat();
+        return;
+      }
+
+      if (code === 'KeyR' || keyLower === 'r') {
+        e.preventDefault();
+        handlers.onRenameActiveChat();
+        return;
+      }
+
+      if (code === 'KeyP' || keyLower === 'p') {
+        e.preventDefault();
+        handlers.onPinActiveChat();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   const isDarkOrContrast = pageTheme === 'dark' || pageTheme === 'high-contrast';
   const activeTabIndex = TAB_ORDER[activeTab];
 
@@ -1029,6 +1228,8 @@ export default function App() {
           onNewChat={handleNewChat}
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
+          onTogglePinSession={handleTogglePinSession}
           onClearAllSessions={handleClearAllSessions}
           lang={lang}
           toggleLang={toggleLang}
@@ -1037,26 +1238,35 @@ export default function App() {
           toggleTheme={toggleTheme}
           isSidebarOpen={isSidebarOpen}
           toggleSidebar={() => handleSetIsSidebarOpen((prev) => !prev)}
+          searchFocusSeq={searchFocusSeq}
+          renameTrigger={renameTrigger}
+          deleteTrigger={deleteTrigger}
         />
 
         <div className="flex-1 min-w-0 min-h-0 h-full overflow-hidden relative flex flex-col">
           {!isSidebarOpen && (
-            <img
-              data-tour="open-sidebar"
-              src="/logo.png"
-              alt={isAr ? 'شعار صحتي' : 'Sehati Logo'}
-              role="button"
-              tabIndex={0}
-              onClick={() => handleSetIsSidebarOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleSetIsSidebarOpen(true);
-                }
-              }}
-              title={isAr ? 'فتح القائمة الجانبية' : 'Open sidebar'}
-              className="w-9 h-9 object-contain rounded-lg cursor-pointer hover:scale-105 active:scale-95 transition-transform absolute top-3 start-3 z-30"
-            />
+            <ShortcutTooltip
+              label={isAr ? 'فتح القائمة الجانبية' : 'Toggle sidebar'}
+              shortcut="Ctrl + B"
+              placement="bottom"
+              className="absolute top-3 start-3 z-30 inline-flex"
+            >
+              <img
+                data-tour="open-sidebar"
+                src="/logo.png"
+                alt={isAr ? 'شعار صحتي' : 'Sehati Logo'}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleSetIsSidebarOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSetIsSidebarOpen(true);
+                  }
+                }}
+                className="w-9 h-9 object-contain rounded-lg cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+              />
+            </ShortcutTooltip>
           )}
 
           {/* Help / Onboarding Guide (?) Button */}
@@ -1105,12 +1315,15 @@ export default function App() {
                   messages={messages}
                   onSendMessage={handleSendMessage}
                   onEditMessage={handleEditMessage}
+                  onMessageFeedback={handleMessageFeedback}
                   onStopGenerating={handleStopGenerating}
                   isLoading={isLoading}
                   isStreaming={isStreaming}
                   lang={lang}
                   externalDraft={tourDraft}
                   onInputTextChange={handleTourInputChange}
+                  focusInputSeq={focusInputSeq}
+                  toggleVoiceSeq={toggleVoiceSeq}
                 />
               </motion.div>
             </motion.div>
