@@ -83,6 +83,7 @@ export interface ChatMessage {
   };
   reported?: boolean;
   reportReason?: string;
+  feedback?: 'good' | 'bad' | null;
   isStreaming?: boolean;
   wasStopped?: boolean;
 }
@@ -93,6 +94,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
+  pinnedAt?: number;
 }
 
 export interface SafetyCheckResult {
