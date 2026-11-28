@@ -35,8 +35,8 @@ const MEDICAL_SYNONYM_MAP: Array<{ patterns: RegExp[]; expansions: string[]; top
     topicTag: 'headache',
   },
   {
-    patterns: [/قلب|القلب|دورة دموية|أوعية دموية|شرايين|\bheart\b|\bcardiovascular\b|\bcirculation\b|\bblood circulation\b/i],
-    expansions: ['heart', 'cardiovascular', 'blood circulation', 'arteries', 'القلب', 'الأوعية الدموية', 'الدورة الدموية'],
+    patterns: [/قلب|القلب|دورة دموية|أوعية دموية|شرايين|أزمة قلبية|ازمة قلبية|نوبة قلبية|\bheart\b|\bheart attack\b|\bcardiovascular\b|\bcirculation\b|\bblood circulation\b/i],
+    expansions: ['heart', 'heart attack', 'cardiovascular', 'blood circulation', 'arteries', 'القلب', 'الأوعية الدموية', 'الدورة الدموية', 'النوبة القلبية'],
     topicTag: 'cardiovascular',
   },
   {
@@ -111,6 +111,21 @@ const MEDICAL_SYNONYM_MAP: Array<{ patterns: RegExp[]; expansions: string[]; top
   },
 ];
 
+const LEADING_GREETING_RE =
+  /^(?:(?:السلام\s+عليكم\s+ورحمة\s+الله\s+وبركاته|السلام\s+عليكم\s+ورحمة\s+الله|السلام\s+عليكم|وعليكم\s+السلام|سلام\s+عليكم|أهلاً\s+وسهلاً|اهلا\s+وسهلا|أهلا\s+وسهلا|أهلاً\s+ب[يك]|أهلا\s+ب[يك]|اهلا\s+ب[يك]|أهلاً|أهلا|اهلا|أهلين|اهلين|مرحباً|مرحبا|هلا|يا\s+هلا|صباح\s+الخير|صباح\s+النور|صباح\s+الفل|مساء\s+الخير|مساء\s+النور|مساء\s+الفل|إزيك|ازيك|كيف\s+حالك|عامل\s+[إا]يه|لو\s+سمحت|من\s+فضلك|يا\s+دكتور|يا\s+صحتي|peace\s+be\s+upon\s+you|hi\s+there|hello\s+there|hey\s+there|good\s+morning|good\s+afternoon|good\s+evening|greetings|hello|hey|hi)[،,!?.:\-\s]+)+/iu;
+
+/**
+ * Removes a leading greeting/courtesy phrase when a substantive question follows it
+ * (e.g., "السلام عليكم، ممكن تشرحلي إيه هو فقر الدم؟" -> "ممكن تشرحلي إيه هو فقر الدم؟")
+ * so retrieval and evidence validation focus strictly on the medical query.
+ */
+export function stripLeadingGreeting(text: string): string {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '';
+  const stripped = trimmed.replace(LEADING_GREETING_RE, '').trim();
+  return stripped.length >= 2 ? stripped : trimmed;
+}
+
 // Normalize Egyptian Arabic colloquialisms and Arabic character variants
 export function normalizeArabicText(text: string): string {
   return text
@@ -179,17 +194,18 @@ export function processQuery(
   uiLang: Language = 'ar'
 ): ProcessedQuery {
   const originalQuery = (rawQuery || '').trim();
-  const detectedLanguage = detectQueryLanguage(originalQuery);
+  const queryWithoutGreeting = stripLeadingGreeting(originalQuery);
+  const detectedLanguage = detectQueryLanguage(queryWithoutGreeting);
   const responseLanguage: Language = uiLang === 'en' ? 'en' : 'ar';
 
-  const normalizedQuery = normalizeTextForSearch(originalQuery);
+  const normalizedQuery = normalizeTextForSearch(queryWithoutGreeting);
 
   // Check if current query has an explicit topic or relies on conversation history pronoun ("its", "أنواعه")
   const matchedExpansions: string[] = [];
   let explicitTopic: string | null = null;
 
   for (const entry of MEDICAL_SYNONYM_MAP) {
-    if (entry.patterns.some((re) => re.test(originalQuery) || re.test(normalizedQuery))) {
+    if (entry.patterns.some((re) => re.test(queryWithoutGreeting) || re.test(normalizedQuery))) {
       explicitTopic = explicitTopic || entry.topicTag;
       matchedExpansions.push(...entry.expansions);
     }
