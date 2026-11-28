@@ -37,6 +37,16 @@ const PROHIBITED_OUTPUT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     pattern: /\b(follow this treatment plan|start taking|stop taking your medication)\b/i,
     reason: 'Prohibited treatment/regimen recommendation detected in output.',
   },
+  {
+    pattern:
+      /\b(?:max(?:imum)?\s+(?:safe\s+|daily\s+)?dos(?:e|age)[^.\n]{0,45}\d[\d,.]*\s*(?:mg|milligrams?|g|grams?|ml|tablets?|pills?)|\d[\d,.]*\s*(?:mg|milligrams?|g|grams?)\s*(?:per\s+day|a\s+day|daily)\s*(?:max|maximum|limit|safe))\b/i,
+    reason: 'Prohibited numeric maximum/daily medication dose figure detected in output.',
+  },
+  {
+    pattern:
+      /(?:الجرع[ةه]\s*القصو[ىي]|أقص[ىي]\s*جرع[ةه]|الحد\s*الأقص[ىي]\s*للجرع[ةه])[^.\n]{0,55}\d[\d,.]*\s*(?:ملليجرام|مجم|ملجم|مل|جرام|جم|قرص|حبة)/i,
+    reason: 'Prohibited numeric maximum medication dose figure detected in Arabic output.',
+  },
 ];
 
 // Filter follow-up questions that invite self-diagnosis or drug dosing
@@ -186,14 +196,14 @@ export function buildInsufficientEvidencePayload(
   const elapsed = Number(((Date.now() - startTimeMs) / 1000).toFixed(3));
 
   const msgEn =
-    'Reliable information is currently unavailable to answer this question accurately.';
+    'Verified evidence is not available in the local Knowledge Base to answer this question accurately.';
   const msgAr =
-    'المعلومات الموثوقة غير متوفرة حالياً للإجابة عن هذا السؤال بدقة.';
+    'لا تتوفر أدلة موثقة في قاعدة المعرفة المحلية للإجابة عن هذا السؤال بدقة.';
 
   const detailEn =
-    'Neither the local Knowledge Base nor reliable general medical knowledge could confirm an accurate educational answer for this query. Please check the medical term or ask about a recognized health or medical topic.';
+    'Our local Knowledge Base does not contain verified evidence covering this specific claim, term, or recent study/trial, so Sehati will not speculate. Please double-check the topic or consult a qualified healthcare specialist for the latest research.';
   const detailAr =
-    'لم تتوفر معلومات كافية في قاعدة المعرفة المحلية أو المعرفة الطبية العامة الموثوقة لتقديم إجابة دقيقة لهذا السؤال. يرجى التأكد من المصطلح أو طرح سؤال حول موضوع طبي أو صحي معروف.';
+    'لا تحتوي قاعدة المعرفة المحلية على أدلة موثقة حول هذا المصطلح أو الدراسة/التجربة الحديثة، ولا يقدم صحتي أي تخمينات بدون مصدر موثوق. يُرجى التأكد من المصطلح أو استشارة طبيب مختص حول أحدث الأبحاث.';
 
   const direct = lang === 'ar' ? msgAr : msgEn;
   const detail = lang === 'ar' ? detailAr : detailEn;
