@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ChatTurnHistory, Language, RagApiPayload } from '../types.js';
+import { ChatTurnHistory, Language, RagApiPayload, RetrievedChunk } from '../types.js';
 import {
   generateGeneralEducationalAnswer,
   generateGroundedAnswer,
@@ -15,6 +15,9 @@ import {
 import { buildGroundedContext } from './contextBuilder.js';
 import {
   checkImmediateEmergency,
+  checkImmediateMedicationRequest,
+  checkImmediatePrivacyQuestion,
+  detectCountryHint,
   SemanticClassifierOptions,
 } from './domainClassifier.js';
 import { validateEvidence } from './evidenceValidator.js';
@@ -25,10 +28,37 @@ import {
   validateAndAssembleResponse,
 } from './responseValidator.js';
 import {
+  buildPrivacyAnswerPayload,
   buildSafetyEarlyDecision,
   runSemanticSafetyFilter,
 } from './safetyFilter.js';
 import { vectorStore } from './vectorStore.js';
+
+const RECENT_RESEARCH_OR_TRIAL_RE =
+  /(\b(?:202[5-9]|203\d)\b.{0,45}\b(?:trial|clinical\s+trial|study|studies|research|gene\s+therapy|breakthrough|drug|vaccine|discover(?:ed|y))\b|\b(?:latest|recent|new|ongoing|upcoming)\s+(?:(?:202[5-9]|203\d)\s+)?(?:clinical\s+trial|trial|study|research|gene\s+therapy\s+trial)\b|(?:أحدث|احدث|جديد[ةه]?)\s+(?:تجرب[ةه]\s+سريري[ةه]|دراس[ةه]|أبحاث|ابحاث|بحث\s+علمي)|(?:تجرب[ةه]\s+سريري[ةه]|دراس[ةه]|بحث|المكتشف\s+في|اكتشف\s+في).{0,25}\b(?:202[5-9]|203\d)\b|\b(?:202[5-9]|203\d)\b.{0,25}(?:تجرب[ةه]\s+سريري[ةه]|دراس[ةه]|بحث))/i;
+
+function isUnverifiedRecentResearchQuery(
+  rawMessage: string,
+  validatedChunks: RetrievedChunk[]
+): boolean {
+  if (!RECENT_RESEARCH_OR_TRIAL_RE.test(rawMessage)) {
+    return false;
+  }
+  const yearMatch = rawMessage.match(/\b(202[5-9]|203\d)\b/);
+  if (yearMatch) {
+    const year = yearMatch[1];
+    const supportedInKb = validatedChunks.some(
+      (c) =>
+        c.text.includes(year) ||
+        (c.publication_date && c.publication_date.includes(year))
+    );
+    return !supportedInKb;
+  }
+  const trialSupportedInKb = validatedChunks.some((c) =>
+    /\b(clinical\s+trial|gene\s+therapy|trial\s+results)\b|تجربة سريرية/i.test(c.text)
+  );
+  return !trialSupportedInKb;
+}
 
 export interface RagRequestOptions {
   message: string;
@@ -69,10 +99,22 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
     hasConfiguredGeminiKey();
 
   if (useSinglePassUnified) {
-    // 1. Instant life-safety emergency check (only emergencies bypass LLM; all social/greeting/thanks/dialectal messages are understood by the model)
+    // 1. Instant life-safety emergency check (only active emergencies & self-harm bypass LLM)
     const immediateEmergency = checkImmediateEmergency(message, history);
     if (immediateEmergency) {
       return buildSafetyEarlyDecision(message, immediateEmergency, uiLang, startTime).earlyResponse!;
+    }
+
+    // 1b. Fixed accurate fact for privacy / chat storage questions (localStorage only, no server DB)
+    if (checkImmediatePrivacyQuestion(message)) {
+      return buildPrivacyAnswerPayload(message, uiLang, startTime);
+    }
+
+    // 1c. Instant deterministic guard for explicit medication dosing, maximum safe daily dose limits,
+    // and personal prescription translation/interpretation (even when framed as general info)
+    const immediateMed = checkImmediateMedicationRequest(message, history);
+    if (immediateMed) {
+      return buildSafetyEarlyDecision(message, immediateMed, uiLang, startTime).earlyResponse!;
     }
 
     if (!message) {
@@ -93,12 +135,26 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
     // 2. Local Hybrid Retrieval & Evidence Validation (<15ms in-memory)
     const processedQuery = processQuery(message, history, uiLang);
     const retrievedChunks = await vectorStore.retrieve(processedQuery, {
-      topK: options.topK ?? 3,
+      topK: options.topK ?? 4,
       relevanceThreshold: 0.24,
       sourceFilter: options.sourceFilter,
       preferredLanguage: uiLang,
     });
     const evidenceCheck = validateEvidence(retrievedChunks, processedQuery);
+
+    // 2b. Questions about specific recent/future clinical trials or unverified studies not present in KB
+    if (isUnverifiedRecentResearchQuery(message, evidenceCheck.validatedChunks)) {
+      return buildInsufficientEvidencePayload(
+        processedQuery,
+        startTime,
+        uiLang === 'ar'
+          ? 'لا تتوفر أدلة موثقة في قاعدة المعرفة المحلية حول هذه الدراسة أو التجربة السريرية الحديثة.'
+          : 'No verified evidence exists in the local Knowledge Base regarding this recent or specific clinical trial or study.',
+        'Knowledge Availability Gate',
+        'heuristic_fallback'
+      );
+    }
+
     const builtContext = evidenceCheck.isSufficient
       ? buildGroundedContext(processedQuery, evidenceCheck, history)
       : null;
@@ -119,6 +175,8 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
 
     // Greeting / Out-of-Scope / Safety Refusal / Emergency / Ambiguous
     if (raw.category !== 'SAFE_MEDICAL_EDUCATION') {
+      const currentCountryHint =
+        raw.category === 'EMERGENCY' ? detectCountryHint(message, history) : undefined;
       const decision = buildSafetyEarlyDecision(
         message,
         {
@@ -130,7 +188,10 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
             Array.isArray(raw.follow_up_questions) && raw.follow_up_questions.length > 0
               ? raw.follow_up_questions
               : undefined,
-          isEgyptConfirmed: Boolean(raw.is_egypt_mentioned),
+          countryHint: currentCountryHint,
+          isEgyptConfirmed:
+            currentCountryHint === 'EG' ||
+            (currentCountryHint === undefined && Boolean(raw.is_egypt_mentioned)),
           confidence: 0.98,
           classificationSource: 'semantic_llm',
         },
@@ -190,6 +251,10 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
   }
 
   // Split-step path (for unit tests with mock overrides or offline CLI mode without API key)
+  if (checkImmediatePrivacyQuestion(message)) {
+    return buildPrivacyAnswerPayload(message, uiLang, startTime);
+  }
+
   const safetyDecision = await runSemanticSafetyFilter(message, history, uiLang, startTime, {
     deadlineMs,
     abortSignal: options.abortSignal,
@@ -210,6 +275,18 @@ export async function processRagQuery(options: RagRequestOptions): Promise<RagAp
   });
 
   const evidenceCheck = validateEvidence(retrievedChunks, processedQuery);
+
+  if (isUnverifiedRecentResearchQuery(message, evidenceCheck.validatedChunks)) {
+    return buildInsufficientEvidencePayload(
+      processedQuery,
+      startTime,
+      uiLang === 'ar'
+        ? 'لا تتوفر أدلة موثقة في قاعدة المعرفة المحلية حول هذه الدراسة أو التجربة السريرية الحديثة.'
+        : 'No verified evidence exists in the local Knowledge Base regarding this recent or specific clinical trial or study.',
+      'Knowledge Availability Gate',
+      classificationSource
+    );
+  }
 
   if (evidenceCheck.isSufficient) {
     const builtContext = buildGroundedContext(processedQuery, evidenceCheck, history);
