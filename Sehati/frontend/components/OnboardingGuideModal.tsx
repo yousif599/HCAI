@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpLeft,
   ArrowUpRight,
@@ -56,6 +56,7 @@ export const OnboardingGuideModal: React.FC<OnboardingGuideModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const [step, setStep] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -76,12 +77,43 @@ export const OnboardingGuideModal: React.FC<OnboardingGuideModalProps> = ({
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         setStep((prev) => (isAr ? Math.min(TOTAL_STEPS - 1, prev + 1) : Math.max(0, prev - 1)));
+      } else if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.isComposing
+      ) {
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        if (
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        const interactiveInsideDialog =
+          target && dialogRef.current?.contains(target)
+            ? target.closest('button, a[href]')
+            : null;
+        if (interactiveInsideDialog && !interactiveInsideDialog.hasAttribute('data-guide-primary')) {
+          return;
+        }
+        e.preventDefault();
+        if (step >= TOTAL_STEPS - 1) {
+          onClose();
+        } else {
+          setStep((prev) => Math.min(TOTAL_STEPS - 1, prev + 1));
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isAr, onClose]);
+  }, [isOpen, isAr, step, onClose]);
 
   if (!isOpen) return null;
 
@@ -306,6 +338,7 @@ export const OnboardingGuideModal: React.FC<OnboardingGuideModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-xs animate-in fade-in duration-150"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-guide-title"
@@ -424,6 +457,7 @@ export const OnboardingGuideModal: React.FC<OnboardingGuideModalProps> = ({
             {isLastStep ? (
               <button
                 type="button"
+                data-guide-primary="true"
                 onClick={onClose}
                 className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
@@ -433,6 +467,7 @@ export const OnboardingGuideModal: React.FC<OnboardingGuideModalProps> = ({
             ) : (
               <button
                 type="button"
+                data-guide-primary="true"
                 onClick={() => setStep((prev) => Math.min(TOTAL_STEPS - 1, prev + 1))}
                 className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
