@@ -26,6 +26,15 @@
 
 ---
 
+## Checkpoint
+
+1. The prototype runs end to end from this repository (`npm install`, then `npm run dev`). It needs one key, `GEMINI_API_KEY`, set in a `.env` file in the project root (copy `.env.example`).
+2. The principle feature (the safety filter) is live in the running app. It refuses a dose request before any model call:
+
+![Safety filter refusing a dose request](checkpoint.png)
+
+---
+
 ## Architecture & 10-Stage Strict RAG Pipeline
 
 ```text
