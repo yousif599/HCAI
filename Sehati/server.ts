@@ -36,7 +36,7 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     const stats = vectorStore.getStats();
     console.log(
-      `Health Information Navigator running on http://0.0.0.0:${PORT} (KB: ${stats.totalDocuments} docs, ${stats.totalChunks} chunks)`
+      `Health Information Navigator running on http://localhost:${PORT} (KB: ${stats.totalDocuments} docs, ${stats.totalChunks} chunks)`
     );
   });
 }
