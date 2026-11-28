@@ -251,11 +251,42 @@ export const InteractiveGuidedTour: React.FC<InteractiveGuidedTourProps> = ({
       if (e.key === 'Escape') {
         e.preventDefault();
         onSkip();
+      } else if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.isComposing
+      ) {
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        if (
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        const interactiveInsideCard =
+          target && cardRef.current?.contains(target)
+            ? target.closest('button, a[href]')
+            : null;
+        if (interactiveInsideCard && !interactiveInsideCard.hasAttribute('data-tour-primary')) {
+          return;
+        }
+        e.preventDefault();
+        if (stepIndex >= TOUR_STEPS.length - 1) {
+          onComplete();
+        } else {
+          onStepChange(stepIndex + 1);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onSkip]);
+  }, [isOpen, stepIndex, onStepChange, onComplete, onSkip]);
 
   const layout = useMemo(() => {
     const pad = 16;
@@ -663,6 +694,7 @@ export const InteractiveGuidedTour: React.FC<InteractiveGuidedTourProps> = ({
             {isLastStep ? (
               <button
                 type="button"
+                data-tour-primary="true"
                 onClick={onComplete}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[0.72rem] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
@@ -672,6 +704,7 @@ export const InteractiveGuidedTour: React.FC<InteractiveGuidedTourProps> = ({
             ) : (
               <button
                 type="button"
+                data-tour-primary="true"
                 onClick={() => onStepChange(stepIndex + 1)}
                 className="inline-flex items-center gap-0.5 px-2.5 py-1 rounded-lg text-[0.72rem] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
