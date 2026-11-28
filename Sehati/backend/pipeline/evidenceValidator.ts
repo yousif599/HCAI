@@ -16,10 +16,13 @@ const GENERIC_MEDICAL_TERMS = new Set([
   'associated', 'related', 'difference', 'between', 'rare', 'ultra', 'syndrome', 'simply', 'role',
   'body', 'human', 'prevent', 'prevention', 'happen', 'happens', 'help', 'definition', 'tell',
   'merely', 'does', 'when', 'someone', 'person', 'people', 'overview', 'complication', 'complications',
+  'please', 'could', 'would', 'want', 'know', 'learn', 'curious', 'dont', 'have', 'just', 'any', 'them',
+  'none', 'myself', 'feeling', 'hello', 'peace', 'upon',
   'مرض', 'امراض', 'اعراض', 'اسباب', 'عوامل', 'خطر', 'جهاز', 'معني', 'انواع', 'عامه', 'معلومات', 'طبيه',
-  'وظيفه', 'كيف', 'يعمل', 'تعمل', 'اشرح', 'اشرحلي', 'وضح', 'وضحلي', 'ببساطه', 'الفرق', 'دور', 'جسم',
-  'الجسم', 'الانسان', 'مضاعفات', 'طرق', 'كيفيه', 'تعريف', 'مفهوم', 'فائده', 'فوائد', 'اضرار', 'يحدث',
-  'يحصل', 'عباره', 'تقولي', 'ممكن', 'سمحت', 'لو', 'عند', 'لدي', 'وقايه', 'الوقايه',
+  'وظيفه', 'كيف', 'يعمل', 'تعمل', 'اشرح', 'اشرحلي', 'تشرحلي', 'وضح', 'وضحلي', 'توضحلي', 'ببساطه', 'الفرق',
+  'دور', 'جسم', 'الجسم', 'الانسان', 'مضاعفات', 'طرق', 'كيفيه', 'تعريف', 'مفهوم', 'فائده', 'فوائد', 'اضرار',
+  'يحدث', 'يحصل', 'عباره', 'تقولي', 'قولي', 'قلي', 'ممكن', 'سمحت', 'لو', 'عند', 'لدي', 'وقايه', 'الوقايه',
+  'السلام', 'عليكم', 'اهلا', 'مرحبا', 'اريد', 'عايز', 'عاوز', 'اعرف', 'معرفه', 'فضول', 'مجرد',
 ]);
 
 // Filter out any unsafe clinical prescription chunks that might exist in raw web/dataset records
