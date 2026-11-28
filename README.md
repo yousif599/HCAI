@@ -1,5 +1,8 @@
+
 # Sehati — Health Information Navigator
+
 > **Bilingual (Arabic & English | RTL/LTR) Strict Medical Education Retrieval-Augmented Generation (RAG) Web Application**
+>
 > https://sehatii.vercel.app/
 
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -11,6 +14,20 @@
 **صحتي / Sehati (Health Information Navigator)** is a bilingual medical education assistant built on a **strict, local-only Retrieval-Augmented Generation (RAG)** architecture. It explains general medical concepts, human anatomy, physiology, disease education, general symptom awareness, risk factors, prevention, and medical terminology **exclusively** using verified evidence retrieved from its pre-indexed local Knowledge Base.
 
 > **Strict Medical Safety Scope:** Sehati is **NOT** a doctor, diagnostic tool, treatment planner, medication prescriber, or clinical decision support system. It never browses the live web during conversations and strictly blocks personal diagnosis, treatment plans, and drug dosage requests while immediately escalating medical emergencies.
+
+---
+
+## Week 8–9 Checkpoint
+
+- **End-to-End Prototype:** The application runs from a clean clone of this repository using `npm install` followed by `npm run dev`. It requires the `GEMINI_API_KEY` environment variable, configured in a `.env` file in the project root (copy `.env.example` and add your key).
+
+- **Live HAI Principle Feature:** The core feature, **Safety Filter & Medical Safety Gate**, is implemented and working in the running application. It intercepts medication dosage requests before the RAG generation stage and returns a safe refusal without invoking the answer-generation model.
+
+**Checkpoint Evidence — Live Safety Filter**
+
+The following screenshot demonstrates the safety filter rejecting a medication dosage request:
+
+![Safety Filter rejecting a medication dosage request](checkpoint.png)
 
 ---
 
@@ -30,44 +47,44 @@
 
 ```text
 USER QUERY (Text or Voice Transcript)
-   │
-   ▼
+  |
+  ▼
 [1] Domain & Intent Classifier (7 categories: SAFE_MEDICAL_EDUCATION, PERSONAL_DIAGNOSIS_REQUEST,
-                                TREATMENT_REQUEST, MEDICATION_REQUEST, OUT_OF_SCOPE, EMERGENCY, AMBIGUOUS)
-   │
-   ▼
+                                 TREATMENT_REQUEST, MEDICATION_REQUEST, OUT_OF_SCOPE, EMERGENCY, AMBIGUOUS)
+  |
+  ▼
 [2] Pre-Retrieval Deterministic Safety Filter
-    ├── EMERGENCY            → Immediate Emergency Alert + Country Hotlines
-    ├── DIAGNOSIS / MEDS /   → Safe Educational Refusal + Guidance to Consult a Physician
-    │   TREATMENT / OUT_OF_SCOPE
-    └── AMBIGUOUS            → Targeted Clarifying Questions (No Guessing; resumes on next turn)
-   │
-   ▼
+   ├── EMERGENCY            → Immediate Emergency Alert + Country Hotlines
+   ├── DIAGNOSIS / MEDS /   → Safe Educational Refusal + Guidance to Consult a Physician
+   │   TREATMENT / OUT_OF_SCOPE
+   └── AMBIGUOUS            → Targeted Clarifying Questions (No Guessing; resumes on next turn)
+  |
+  ▼
 [3] Query Processor (AR/EN detection, Egyptian Arabic normalization, medical synonyms,
-                     multi-turn clarification & topic anchor inheritance)
-   │
-   ▼
+                    multi-turn clarification & topic anchor inheritance)
+  |
+  ▼
 [4] Multilingual Embeddings (gemini-embedding-2 + 256-dim cross-lingual local vector fallback)
-   │
-   ▼
+  |
+  ▼
 [5] Local Hybrid Vector Store (Cosine Similarity + BM25 + Title/Topic Boost + Deduplication + Top-K)
-   │
-   ▼
+  |
+  ▼
 [6] Evidence Validator (Source allowlist enforcement, relevance threshold, unsafe content & conflict check)
-   │
-   ▼
+  |
+  ▼
 [7] Context Builder (Untrusted evidence framing + full document provenance + compact history window)
-   │
-   ▼
+  |
+  ▼
 [8] Grounded LLM Generation (@google/genai with 3-wave staggered hedging & strict JSON schema)
-   │
-   ▼
+  |
+  ▼
 [9] Post-Generation Validator (Zod schema validation, citation verification, safety leakage scan,
-                               client-side vague/guessing output guard)
-   │
-   ▼
+                              client-side vague/guessing output guard)
+  |
+  ▼
 [10] Structured Bilingual Response (Direct Answer, Detailed Explanation, Expandable Evidence Used,
-                                    Verified Sources, Educational Disclaimer, Follow-up Questions)
+                                   Verified Sources, Educational Disclaimer, Follow-up Questions)
 ```
 
 ---
@@ -125,7 +142,7 @@ All endpoints are served locally by Express (`server.ts`) and on Vercel by the S
 │   │   ├── responseValidator.ts      # Post-generation Zod, citation & safety leakage validator
 │   │   └── ragOrchestrator.ts        # End-to-end strict RAG orchestrator
 │   └── routes/
-│       └── chatRoutes.ts             # Express API routes (/api/chat, /api/transcribe, /api/health, etc.)
+│       └── chatRoutes.ts             # Express API routes
 ├── data/
 │   ├── knowledge_base/
 │   │   └── chunks.json               # Preprocessed, deduplicated medical chunks
@@ -133,10 +150,12 @@ All endpoints are served locally by Express (`server.ts`) and on Vercel by the S
 │       └── index.json                # Persistent local vector index
 ├── frontend/
 │   ├── main.tsx                      # React root entry point
-│   ├── App.tsx                       # Bilingual RTL/LTR state, sessions & API orchestration
+│   ├── App.tsx                        # Bilingual RTL/LTR state, sessions & API orchestration
 │   ├── index.css                     # Tailwind CSS v4 styles, fonts & theme tokens
-│   ├── types/index.ts                # Frontend TypeScript interfaces & API_TIMEOUT_MS (30000ms)
-│   ├── data/constants.ts             # Localized UI strings, guides & sample prompts
+│   ├── types/
+│   │   └── index.ts                  # Frontend TypeScript interfaces & API_TIMEOUT_MS
+│   ├── data/
+│   │   └── constants.ts              # Localized UI strings, guides & sample prompts
 │   ├── utils/
 │   │   └── chatResponseGuard.ts      # Client-side vague/guessing output fallback guard
 │   └── components/
@@ -144,20 +163,20 @@ All endpoints are served locally by Express (`server.ts`) and on Vercel by the S
 │       ├── Sidebar.tsx               # Navigation sidebar & session switcher
 │       ├── ChatView.tsx              # Main chat workspace, voice recording & quick prompts
 │       ├── MessageItem.tsx           # Structured RAG card (Answer, Evidence, Sources, Follow-ups)
-│       ├── EmergencyDirectoryView.tsx# Country-specific emergency numbers & red flags
+│       ├── EmergencyDirectoryView.tsx # Country-specific emergency numbers & red flags
 │       ├── PatientGuideView.tsx      # Scope, medical literacy & safe usage guide
 │       ├── AppearanceModal.tsx       # Theme, font size & simple-mode controls
 │       ├── OnboardingGuideModal.tsx  # First-time user scope walkthrough
 │       └── InteractiveGuidedTour.tsx # Step-by-step interactive product tour
 ├── public/
 │   └── logo.png                      # Application brand logo & favicon
-├── index.html                        # Vite HTML entry point
-├── server.ts                         # Local full-stack Express + Vite server (Port 3000)
-├── vercel.json                       # Vercel build, serverless function & rewrite config
-├── .vercelignore                     # Excludes non-runtime files from Vercel uploads
-├── .env.example                      # Environment variable template
-├── package.json                      # Dependencies & npm scripts
-└── tsconfig.json                     # TypeScript configuration
+├── index.html                         # Vite HTML entry point
+├── server.ts                          # Local full-stack Express + Vite server (Port 3000)
+├── vercel.json                        # Vercel build, serverless function & rewrite config
+├── .vercelignore                      # Excludes non-runtime files from Vercel uploads
+├── .env.example                       # Environment variable template
+├── package.json                       # Dependencies & npm scripts
+└── tsconfig.json                      # TypeScript configuration
 ```
 
 ---
@@ -176,30 +195,46 @@ All endpoints are served locally by Express (`server.ts`) and on Vercel by the S
 ## Getting Started (Local Development)
 
 ### 1. Prerequisites
+
 - **Node.js** `v20+`
 - **npm** `v10+`
 - A valid **Gemini API Key**
 
 ### 2. Installation
+
+Clone the repository and install dependencies:
+
 ```bash
 npm install
 ```
 
 ### 3. Configure Environment Variables
+
 Copy `.env.example` to `.env` and add your key:
+
 ```bash
 cp .env.example .env
 ```
+
+Configure the following environment variable in `.env`:
 
 ```env
 GEMINI_API_KEY="your_gemini_api_key"
 ```
 
+**Important:** Never commit your `.env` file or expose your API key in the repository.
+
 ### 4. Run the Application (Port 3000)
+
 ```bash
 npm run dev
 ```
-Open `http://localhost:3000` in your browser.
+
+Open the application in your browser:
+
+```text
+http://localhost:3000
+```
 
 ### Available Scripts
 
@@ -214,12 +249,13 @@ Open `http://localhost:3000` in your browser.
 
 ## Deploying to Vercel
 
-This project is pre-configured for zero-friction full-stack deployment on **Vercel** via `vercel.json` and `api/index.ts`.
+This project is pre-configured for full-stack deployment on **Vercel** via `vercel.json` and `api/index.ts`.
 
 ### Steps
+
 1. Push the repository to **GitHub**, **GitLab**, or **Bitbucket**.
 2. Go to [Vercel](https://vercel.com) → **Add New Project** → import your repository.
-3. Keep the auto-detected settings from `vercel.json`:
+3. Keep the project settings configured for Vite:
    - **Framework Preset:** `Vite`
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
@@ -227,18 +263,21 @@ This project is pre-configured for zero-friction full-stack deployment on **Verc
    - `GEMINI_API_KEY` = `your_gemini_api_key`
 5. Click **Deploy**.
 6. Verify your live backend deployment by visiting:
-   ```text
-   https://<your-project>.vercel.app/api/health
-   ```
-   You should receive HTTP `200` with `"status": "healthy"`, `"knowledgeBaseDocuments": 1148`, and `"knowledgeBaseChunks": 2545`.
+
+```text
+https://<your-project>.vercel.app/api/health
+```
+
+You should receive HTTP `200` with a healthy service status and the expected knowledge base document/chunk counts.
 
 ### How Vercel Configuration Works (`vercel.json`)
+
 - **Serverless Express Handler:** All `/api/*` and `/chat` traffic rewrites to `api/index.ts`.
 - **SPA Routing:** All non-API routes rewrite to `/index.html`.
 - **Function Resources:** `maxDuration: 30` (matches the 30s app timeout ceiling) and `memory: 1024` MB.
 - **Bundled Knowledge Base:** `includeFiles` explicitly packages `data/knowledge_base/chunks.json` and `data/vector_store/index.json` into the serverless bundle so local RAG works cleanly on cold starts.
 
-> **Note on `maxDuration`:** Vercel Hobby and Pro plans both support up to `30s+` with Fluid Compute / Serverless settings; if a restricted plan caps function timeouts lower, adjust `maxDuration` accordingly in `vercel.json`.
+> **Note:** Available serverless execution time and memory depend on your Vercel plan and project configuration. Verify the limits supported by your deployment plan.
 
 ---
 
@@ -259,14 +298,7 @@ npm run lint
 npm run build
 ```
 
----
-
-## Checkpoint
-
-1. The prototype runs end to end from this repository (`npm install`, then `npm run dev`). It needs one key, `GEMINI_API_KEY`, set in a `.env` file in the project root (copy `.env.example`).
-2. The principle feature (the safety filter) is live in the running app. It refuses a dose request before any model call:
-
-![Safety filter refusing a dose request](checkpoint.png)
+Both commands should complete successfully before deployment.
 
 ---
 
