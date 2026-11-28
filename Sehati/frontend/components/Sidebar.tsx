@@ -3,15 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
+  Check,
   Languages,
   Moon,
   PanelLeftClose,
   PanelRightClose,
+  Pencil,
   PhoneCall,
+  Pin,
+  PinOff,
   Search,
   SquarePen,
   Stethoscope,
@@ -21,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { ChatSession, Language } from '../types';
+import { ShortcutTooltip } from './ShortcutTooltip';
 
 const TAB_PILL_SPRING = {
   type: 'spring' as const,
@@ -37,6 +42,8 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string, e: React.MouseEvent) => void;
+  onRenameSession: (id: string, newTitle: string) => void;
+  onTogglePinSession: (id: string) => void;
   onClearAllSessions: () => void;
   lang: Language;
   toggleLang: () => void;
@@ -45,6 +52,9 @@ interface SidebarProps {
   toggleTheme: () => void;
   isSidebarOpen: boolean;
   toggleSidebar: () => void;
+  searchFocusSeq?: number;
+  renameTrigger?: { sessionId: string; seq: number } | null;
+  deleteTrigger?: { sessionId: string; seq: number } | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -55,6 +65,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onSelectSession,
   onDeleteSession,
+  onRenameSession,
+  onTogglePinSession,
   onClearAllSessions,
   lang,
   toggleLang,
@@ -63,16 +75,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   toggleTheme,
   isSidebarOpen,
   toggleSidebar,
+  searchFocusSeq = 0,
+  renameTrigger = null,
+  deleteTrigger = null,
 }) => {
   const isAr = lang === 'ar';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const appliedSearchSeqRef = useRef(0);
+  const appliedRenameSeqRef = useRef(0);
+  const appliedDeleteSeqRef = useRef(0);
 
   useEffect(() => {
     if (!isSidebarOpen) {
       setIsSearchOpen(false);
+      setRenamingSessionId(null);
     }
   }, [isSidebarOpen]);
 
@@ -82,15 +106,88 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [isSearchOpen]);
 
+  useEffect(() => {
+    if (searchFocusSeq > 0 && appliedSearchSeqRef.current !== searchFocusSeq) {
+      appliedSearchSeqRef.current = searchFocusSeq;
+      setIsSearchOpen(true);
+      const timer = window.setTimeout(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }, 60);
+      return () => window.clearTimeout(timer);
+    }
+  }, [searchFocusSeq]);
+
+  useEffect(() => {
+    if (renameTrigger && appliedRenameSeqRef.current !== renameTrigger.seq) {
+      appliedRenameSeqRef.current = renameTrigger.seq;
+      const target = sessions.find((s) => s.id === renameTrigger.sessionId);
+      if (target) {
+        setRenamingSessionId(target.id);
+        setRenameDraft(target.title);
+      }
+    }
+  }, [renameTrigger, sessions]);
+
+  useEffect(() => {
+    if (renamingSessionId) {
+      const timer = window.setTimeout(() => {
+        renameInputRef.current?.focus();
+        renameInputRef.current?.select();
+      }, 40);
+      return () => window.clearTimeout(timer);
+    }
+  }, [renamingSessionId]);
+
+  useEffect(() => {
+    if (deleteTrigger && appliedDeleteSeqRef.current !== deleteTrigger.seq) {
+      appliedDeleteSeqRef.current = deleteTrigger.seq;
+      if (sessions.some((s) => s.id === deleteTrigger.sessionId)) {
+        setSessionToDelete(deleteTrigger.sessionId);
+      }
+    }
+  }, [deleteTrigger, sessions]);
+
   const filteredSessions = useMemo(() => {
     const q = sidebarSearchQuery.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) => {
-      const matchTitle = s.title.toLowerCase().includes(q);
-      const matchMessage = s.messages?.some((m) => m.text.toLowerCase().includes(q));
-      return matchTitle || matchMessage;
+    const list = !q
+      ? sessions
+      : sessions.filter((s) => {
+          const matchTitle = s.title.toLowerCase().includes(q);
+          const matchMessage = s.messages?.some((m) => m.text.toLowerCase().includes(q));
+          return matchTitle || matchMessage;
+        });
+
+    return [...list].sort((a, b) => {
+      const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+      if (pinDiff !== 0) return pinDiff;
+      if (a.pinned && b.pinned) {
+        return (b.pinnedAt ?? b.updatedAt) - (a.pinnedAt ?? a.updatedAt);
+      }
+      return b.updatedAt - a.updatedAt;
     });
   }, [sessions, sidebarSearchQuery]);
+
+  const startRenamingSession = (session: ChatSession, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setRenamingSessionId(session.id);
+    setRenameDraft(session.title);
+  };
+
+  const commitRename = () => {
+    if (!renamingSessionId) return;
+    const trimmed = renameDraft.trim();
+    if (trimmed) {
+      onRenameSession(renamingSessionId, trimmed);
+    }
+    setRenamingSessionId(null);
+    setRenameDraft('');
+  };
+
+  const cancelRename = () => {
+    setRenamingSessionId(null);
+    setRenameDraft('');
+  };
 
   const confirmDeleteSession = () => {
     if (sessionToDelete) {
@@ -98,6 +195,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setSessionToDelete(null);
     }
   };
+
+  useEffect(() => {
+    if (!sessionToDelete) return;
+    const onModalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSessionToDelete(null);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmDeleteSession();
+      }
+    };
+    window.addEventListener('keydown', onModalKeyDown);
+    return () => window.removeEventListener('keydown', onModalKeyDown);
+  }, [sessionToDelete]);
 
   const confirmClearAll = () => {
     onClearAllSessions();
@@ -130,21 +242,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Sidebar Header inside aside: Logo + Full Brand + Search & Collapse */}
         <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 shrink-0">
-            <img
-              src="/logo.png"
-              alt={isAr ? 'شعار صحتي' : 'Sehati Logo'}
-              role="button"
-              tabIndex={0}
-              onClick={toggleSidebar}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  toggleSidebar();
-                }
-              }}
-              title={isAr ? 'إخفاء القائمة الجانبية' : 'Close sidebar'}
-              className="w-8 h-8 object-contain rounded-lg cursor-pointer hover:scale-105 active:scale-95 transition-transform shrink-0"
-            />
+            <ShortcutTooltip
+              label={isAr ? 'إخفاء القائمة الجانبية' : 'Toggle sidebar'}
+              shortcut="Ctrl + B"
+              placement="bottom"
+            >
+              <img
+                src="/logo.png"
+                alt={isAr ? 'شعار صحتي' : 'Sehati Logo'}
+                role="button"
+                tabIndex={0}
+                onClick={toggleSidebar}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSidebar();
+                  }
+                }}
+                className="w-8 h-8 object-contain rounded-lg cursor-pointer hover:scale-105 active:scale-95 transition-transform shrink-0"
+              />
+            </ShortcutTooltip>
             <span
               className={`font-black text-lg sm:text-xl text-slate-900 dark:text-white font-['Cairo'] select-none leading-none inline-block whitespace-nowrap ${
                 isAr ? 'tracking-[-0.02em] [letter-spacing:-0.02em]' : 'tracking-normal'
@@ -159,33 +276,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsSearchOpen((prev) => !prev)}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                isSearchOpen
-                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title={isAr ? 'بحث في المحادثات' : 'Search chats'}
-              aria-label={isAr ? 'بحث في المحادثات' : 'Search chats'}
+            <ShortcutTooltip
+              label={isAr ? 'بحث في المحادثات' : 'Search history'}
+              shortcut="Ctrl + Shift + K"
+              placement="bottom"
             >
-              <Search className="w-4 h-4" />
-            </button>
+              <button
+                type="button"
+                onClick={() => setIsSearchOpen((prev) => !prev)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isSearchOpen
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                aria-label={isAr ? 'بحث في المحادثات' : 'Search history'}
+              >
+                <Search className="w-4 h-4" />
+              </button>
+            </ShortcutTooltip>
 
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title={isAr ? 'إخفاء القائمة الجانبية' : 'Collapse sidebar'}
-              aria-label={isAr ? 'إخفاء القائمة الجانبية' : 'Collapse sidebar'}
+            <ShortcutTooltip
+              label={isAr ? 'إخفاء القائمة الجانبية' : 'Toggle sidebar'}
+              shortcut="Ctrl + B"
+              placement="bottom"
             >
-              {isAr ? (
-                <PanelRightClose className="w-4 h-4" />
-              ) : (
-                <PanelLeftClose className="w-4 h-4" />
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                aria-label={isAr ? 'إخفاء القائمة الجانبية' : 'Toggle sidebar'}
+              >
+                {isAr ? (
+                  <PanelRightClose className="w-4 h-4" />
+                ) : (
+                  <PanelLeftClose className="w-4 h-4" />
+                )}
+              </button>
+            </ShortcutTooltip>
           </div>
         </div>
 
@@ -202,10 +329,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="relative flex items-center">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute start-2.5 pointer-events-none" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   autoFocus
                   value={sidebarSearchQuery}
                   onChange={(e) => setSidebarSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setIsSearchOpen(false);
+                    }
+                  }}
                   placeholder={isAr ? 'ابحث في المحادثات...' : 'Search past chats...'}
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs py-1.5 ps-8 pe-7 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
                 />
@@ -232,31 +366,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
             const isNewChatActive = activeTab === 'chat' && !hasActiveSavedSession;
             return (
-              <button
-                type="button"
-                data-tour="new-chat"
-                aria-current={isNewChatActive ? 'page' : undefined}
-                onClick={() => {
-                  onNewChat();
-                  closeSidebarOnMobile();
-                }}
-                className={`relative w-full px-3.5 sm:px-4 py-2.5 rounded-full text-sm font-medium flex items-center gap-3 transition-colors duration-200 active:scale-[0.98] touch-manipulation select-none whitespace-nowrap cursor-pointer ${
-                  isNewChatActive
-                    ? 'text-emerald-700 dark:text-emerald-300 font-semibold'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
-                }`}
+              <ShortcutTooltip
+                label={isAr ? 'دردشة جديدة' : 'New Chat'}
+                shortcut="Ctrl + Shift + O"
+                placement="end"
+                className="block w-full"
               >
-                {isNewChatActive && (
-                  <motion.span
-                    layoutId="sidebar-nav-active-pill"
-                    transition={TAB_PILL_SPRING}
-                    aria-hidden="true"
-                    className="absolute inset-0 rounded-full bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 dark:border-emerald-400/20"
-                  />
-                )}
-                <SquarePen className="relative z-10 w-[18px] h-[18px] shrink-0" />
-                <span className="relative z-10 truncate">{isAr ? 'دردشة جديدة' : 'New Chat'}</span>
-              </button>
+                <button
+                  type="button"
+                  data-tour="new-chat"
+                  aria-current={isNewChatActive ? 'page' : undefined}
+                  onClick={() => {
+                    onNewChat();
+                    closeSidebarOnMobile();
+                  }}
+                  className={`relative w-full px-3.5 sm:px-4 py-2.5 rounded-full text-sm font-medium flex items-center gap-3 transition-colors duration-200 active:scale-[0.98] touch-manipulation select-none whitespace-nowrap cursor-pointer ${
+                    isNewChatActive
+                      ? 'text-emerald-700 dark:text-emerald-300 font-semibold'
+                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                  }`}
+                >
+                  {isNewChatActive && (
+                    <motion.span
+                      layoutId="sidebar-nav-active-pill"
+                      transition={TAB_PILL_SPRING}
+                      aria-hidden="true"
+                      className="absolute inset-0 rounded-full bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 dark:border-emerald-400/20"
+                    />
+                  )}
+                  <SquarePen className="relative z-10 w-[18px] h-[18px] shrink-0" />
+                  <span className="relative z-10 truncate">{isAr ? 'دردشة جديدة' : 'New Chat'}</span>
+                </button>
+              </ShortcutTooltip>
             );
           })()}
 
@@ -338,14 +479,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             filteredSessions.map((session) => {
               const isActive = activeTab === 'chat' && session.id === currentSessionId;
+              const isRenaming = renamingSessionId === session.id;
               return (
                 <div
                   key={session.id}
                   onClick={() => {
+                    if (isRenaming) return;
                     onSelectSession(session.id);
                     closeSidebarOnMobile();
                   }}
-                  className={`relative group px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors duration-200 flex items-center justify-between gap-2 ${
+                  className={`relative group px-2.5 py-2 rounded-xl text-xs cursor-pointer transition-colors duration-200 flex items-center justify-between gap-1.5 ${
                     isActive
                       ? 'text-emerald-900 dark:text-emerald-100 font-semibold'
                       : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60'
@@ -359,19 +502,139 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="absolute inset-0 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/50 border border-emerald-500/20 dark:border-emerald-400/20"
                     />
                   )}
-                  <p className="relative z-10 flex-1 min-w-0 truncate">{session.title}</p>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSessionToDelete(session.id);
-                    }}
-                    className="relative z-10 p-1 text-slate-400 hover:text-red-500 rounded transition-colors shrink-0 cursor-pointer opacity-75 group-hover:opacity-100"
-                    title={isAr ? 'حذف المحادثة' : 'Delete chat'}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {isRenaming ? (
+                    <div
+                      className="relative z-10 flex items-center gap-1 flex-1 min-w-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitRename();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                        aria-label={isAr ? 'اسم المحادثة الجديد' : 'New chat name'}
+                        className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-emerald-500 rounded-lg px-2 py-0.5 text-xs font-medium text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={commitRename}
+                        className="p-1 text-emerald-600 hover:bg-emerald-500/10 rounded transition-colors cursor-pointer shrink-0"
+                        aria-label={isAr ? 'حفظ الاسم' : 'Save name'}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelRename}
+                        className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition-colors cursor-pointer shrink-0"
+                        aria-label={isAr ? 'إلغاء' : 'Cancel'}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative z-10 flex items-center gap-1.5 flex-1 min-w-0">
+                        {session.pinned && (
+                          <Pin className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 fill-current" />
+                        )}
+                        <p className="flex-1 min-w-0 truncate">{session.title}</p>
+                      </div>
+
+                      <div
+                        className={`relative z-10 flex items-center gap-0.5 shrink-0 transition-opacity ${
+                          isActive
+                            ? 'opacity-100'
+                            : 'opacity-80 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'
+                        }`}
+                      >
+                        <ShortcutTooltip
+                          label={
+                            session.pinned
+                              ? isAr
+                                ? 'إلغاء تثبيت المحادثة'
+                                : 'Unpin chat'
+                              : isAr
+                              ? 'تثبيت المحادثة'
+                              : 'Pin chat'
+                          }
+                          shortcut="P"
+                          placement="top"
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTogglePinSession(session.id);
+                            }}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              session.pinned
+                                ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10'
+                                : 'text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400'
+                            }`}
+                            aria-label={
+                              session.pinned
+                                ? isAr
+                                  ? 'إلغاء تثبيت المحادثة'
+                                  : 'Unpin chat'
+                                : isAr
+                                ? 'تثبيت المحادثة'
+                                : 'Pin chat'
+                            }
+                          >
+                            {session.pinned ? (
+                              <PinOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Pin className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </ShortcutTooltip>
+
+                        <ShortcutTooltip
+                          label={isAr ? 'إعادة تسمية المحادثة' : 'Rename chat'}
+                          shortcut="R"
+                          placement="top"
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => startRenamingSession(session, e)}
+                            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded transition-colors cursor-pointer"
+                            aria-label={isAr ? 'إعادة تسمية المحادثة' : 'Rename chat'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </ShortcutTooltip>
+
+                        <ShortcutTooltip
+                          label={isAr ? 'حذف المحادثة' : 'Delete chat'}
+                          shortcut="D"
+                          placement="top"
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSessionToDelete(session.id);
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors cursor-pointer"
+                            aria-label={isAr ? 'حذف المحادثة' : 'Delete chat'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </ShortcutTooltip>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })

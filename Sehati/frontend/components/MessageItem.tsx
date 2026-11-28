@@ -24,7 +24,9 @@ import {
   ArrowUpLeft,
   Pencil,
   X,
-  Send
+  Send,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import { ChatMessage, Language } from '../types';
 
@@ -37,6 +39,7 @@ interface MessageItemProps {
   lang: Language;
   onSelectFollowUp?: (question: string) => void;
   onEditMessage?: (messageId: string, newText: string) => Promise<void> | void;
+  onFeedback?: (messageId: string, feedback: 'good' | 'bad' | null) => void;
   isLoading?: boolean;
 }
 
@@ -189,6 +192,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   lang,
   onSelectFollowUp,
   onEditMessage,
+  onFeedback,
   isLoading = false,
 }) => {
   const isAr = lang === 'ar';
@@ -208,9 +212,17 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     return 1;
   });
   const [isEvidenceExpanded, setIsEvidenceExpanded] = useState(false);
+  const [isSourcesExpanded, setIsSourcesExpanded] = useState(true);
+  const [localFeedback, setLocalFeedback] = useState<'good' | 'bad' | null>(
+    message.feedback ?? null
+  );
   const speechTokenRef = useRef(0);
   const speechOffsetRef = useRef(0);
   const isOwnSpeechRef = useRef(false);
+
+  useEffect(() => {
+    setLocalFeedback(message.feedback ?? null);
+  }, [message.feedback]);
 
   useEffect(() => {
     return () => {
@@ -415,6 +427,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
     }
+  };
+
+  const handleFeedback = (choice: 'good' | 'bad') => {
+    const nextFeedback: 'good' | 'bad' | null = localFeedback === choice ? null : choice;
+    setLocalFeedback(nextFeedback);
+    onFeedback?.(message.id, nextFeedback);
   };
 
   const cleanTextForSpeech = textForCopy.replace(/[*#`_]/g, '').trim();
@@ -735,54 +753,76 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             </div>
           )}
 
-          {/* D. Verified Sources Section */}
+          {/* D. Verified Sources Section (Collapsible) */}
           {!isStreamingMsg && rag.sources && rag.sources.length > 0 && (
-            <div data-tour="assistant-sources" className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                <span>{isAr ? 'المصادر' : 'Sources'}</span>
-              </p>
-              <ul className="space-y-2">
-                {rag.sources.map((src, idx) => (
-                  <li
-                    key={`${src.source_name}-${idx}`}
-                    className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5"
-                  >
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-semibold text-slate-800 dark:text-slate-100">
-                        {src.source_name}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      {src.url ? (
-                        <a
-                          href={src.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-teal-700 dark:text-teal-400 hover:underline font-medium"
-                        >
-                          <span>{src.title}</span>
-                          <ExternalLink className="w-3 h-3 shrink-0" />
-                        </a>
-                      ) : (
-                        <span className="font-medium text-slate-700 dark:text-slate-200">
-                          {src.title}
+            <div
+              data-tour="assistant-sources"
+              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() => setIsSourcesExpanded((prev) => !prev)}
+                aria-expanded={isSourcesExpanded}
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <BookOpen className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>
+                    {isAr
+                      ? `المصادر (${rag.sources.length})`
+                      : `Sources (${rag.sources.length})`}
+                  </span>
+                </span>
+                {isSourcesExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                )}
+              </button>
+
+              {isSourcesExpanded && (
+                <ul className="px-4 pb-3.5 pt-2.5 border-t border-slate-200/70 dark:border-slate-800 space-y-2">
+                  {rag.sources.map((src, idx) => (
+                    <li
+                      key={`${src.source_name}-${idx}`}
+                      className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5"
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                          {src.source_name}
                         </span>
+                        <span aria-hidden="true">·</span>
+                        {src.url ? (
+                          <a
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-teal-700 dark:text-teal-400 hover:underline font-medium"
+                          >
+                            <span>{src.title}</span>
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="font-medium text-slate-700 dark:text-slate-200">
+                            {src.title}
+                          </span>
+                        )}
+                        {src.publication_date && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-slate-400">{src.publication_date}</span>
+                          </>
+                        )}
+                      </div>
+                      {src.evidence && (
+                        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-relaxed">
+                          {src.evidence}
+                        </p>
                       )}
-                      {src.publication_date && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="text-slate-400">{src.publication_date}</span>
-                        </>
-                      )}
-                    </div>
-                    {src.evidence && (
-                      <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-relaxed">
-                        {src.evidence}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
@@ -857,6 +897,43 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             <Copy className="w-3.5 h-3.5" />
           )}
         </button>
+
+        {/* Good / Bad Response Feedback */}
+        <div
+          role="group"
+          aria-label={isAr ? 'تقييم الإجابة' : 'Response feedback'}
+          className="inline-flex items-center gap-1"
+        >
+          <button
+            type="button"
+            onClick={() => handleFeedback('good')}
+            aria-pressed={localFeedback === 'good'}
+            aria-label={isAr ? 'إجابة جيدة' : 'Good response'}
+            title={isAr ? 'إجابة جيدة' : 'Good response'}
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs ${
+              localFeedback === 'good'
+                ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40'
+                : 'hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+            }`}
+          >
+            <ThumbsUp className={`w-3.5 h-3.5 ${localFeedback === 'good' ? 'fill-current' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleFeedback('bad')}
+            aria-pressed={localFeedback === 'bad'}
+            aria-label={isAr ? 'إجابة غير جيدة' : 'Bad response'}
+            title={isAr ? 'إجابة غير جيدة' : 'Bad response'}
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs ${
+              localFeedback === 'bad'
+                ? 'text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-950/40'
+                : 'hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+            }`}
+          >
+            <ThumbsDown className={`w-3.5 h-3.5 ${localFeedback === 'bad' ? 'fill-current' : ''}`} />
+          </button>
+        </div>
 
         {ttsState === 'idle' ? (
           <button

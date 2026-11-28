@@ -22,17 +22,21 @@ import {
 } from 'lucide-react';
 import { API_TIMEOUT_MS, ChatMessage, Language } from '../types';
 import { MessageItem } from './MessageItem';
+import { ShortcutTooltip } from './ShortcutTooltip';
 
 interface ChatViewProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => Promise<void>;
   onEditMessage?: (messageId: string, newText: string) => Promise<void>;
+  onMessageFeedback?: (messageId: string, feedback: 'good' | 'bad' | null) => void;
   onStopGenerating?: () => void;
   isLoading: boolean;
   isStreaming?: boolean;
   lang: Language;
   externalDraft?: { text: string; seq: number } | null;
   onInputTextChange?: (text: string) => void;
+  focusInputSeq?: number;
+  toggleVoiceSeq?: number;
 }
 
 const WAVEFORM_HEIGHT_CLASSES = [
@@ -631,12 +635,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   messages,
   onSendMessage,
   onEditMessage,
+  onMessageFeedback,
   onStopGenerating,
   isLoading,
   isStreaming = false,
   lang,
   externalDraft,
   onInputTextChange,
+  focusInputSeq = 0,
+  toggleVoiceSeq = 0,
 }) => {
   const isAr = lang === 'ar';
   const isGenerating = isLoading || isStreaming;
@@ -667,9 +674,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const waveformRafRef = useRef<number | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
+  const recognitionRestartTimerRef = useRef<number | null>(null);
+  const isRecordingActiveRef = useRef(false);
 
   const onInputTextChangeRef = useRef(onInputTextChange);
   const appliedDraftSeqRef = useRef<number | null>(null);
+  const appliedFocusSeqRef = useRef(focusInputSeq);
+  const appliedVoiceSeqRef = useRef(toggleVoiceSeq);
+  const handleToggleMicRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     onInputTextChangeRef.current = onInputTextChange;
@@ -690,6 +702,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const targetInput = inputRef.current || bottomTextareaRef.current;
     targetInput?.focus();
   }, [externalDraft]);
+
+  useEffect(() => {
+    if (focusInputSeq > 0 && appliedFocusSeqRef.current !== focusInputSeq) {
+      appliedFocusSeqRef.current = focusInputSeq;
+      const targetInput = inputRef.current || bottomTextareaRef.current;
+      targetInput?.focus();
+    }
+  }, [focusInputSeq]);
+
+  useEffect(() => {
+    if (toggleVoiceSeq > 0 && appliedVoiceSeqRef.current !== toggleVoiceSeq) {
+      appliedVoiceSeqRef.current = toggleVoiceSeq;
+      handleToggleMicRef.current();
+    }
+  }, [toggleVoiceSeq]);
 
   const [headlineIndex, setHeadlineIndex] = useState(0);
   const [isHeadlineFading, setIsHeadlineFading] = useState(false);
@@ -779,6 +806,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!trimmed || isGenerating) return;
 
     // Reset mic state cleanly and submit the exact selected question through the unified RAG + Safety Filter pipeline
+    const wasRecording =
+      isListening || isRecordingActiveRef.current || Boolean(recognitionRef.current) || Boolean(mediaRecorderRef.current);
+    isRecordingActiveRef.current = false;
     micSessionIdRef.current += 1;
     transcribeAbortRef.current?.abort();
     transcribeAbortRef.current = null;
@@ -786,7 +816,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     baseInputBeforeMicRef.current = '';
     audioChunksRef.current = [];
 
-    if (isListening || recognitionRef.current || mediaRecorderRef.current) {
+    if (wasRecording) {
       void stopListening('submit', micSessionIdRef.current);
     }
 
@@ -978,7 +1008,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   useEffect(() => {
     return () => {
+      isRecordingActiveRef.current = false;
       micSessionIdRef.current += 1;
+      if (recognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(recognitionRestartTimerRef.current);
+        recognitionRestartTimerRef.current = null;
+      }
       transcribeAbortRef.current?.abort();
       stopWaveform();
       if (recognitionRef.current) {
@@ -1015,6 +1050,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     expectedSessionId?: number
   ) => {
     const sessionId = expectedSessionId ?? micSessionIdRef.current;
+    isRecordingActiveRef.current = false;
+    if (recognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(recognitionRestartTimerRef.current);
+      recognitionRestartTimerRef.current = null;
+    }
     setIsListening(false);
     stopWaveform();
 
@@ -1135,6 +1175,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!text || isGenerating) return;
 
     // Reset all microphone & transcription state cleanly so submitted speech cannot reappear
+    const wasRecording =
+      isListening || isRecordingActiveRef.current || Boolean(recognitionRef.current) || Boolean(mediaRecorderRef.current);
+    isRecordingActiveRef.current = false;
     micSessionIdRef.current += 1;
     transcribeAbortRef.current?.abort();
     transcribeAbortRef.current = null;
@@ -1142,7 +1185,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     baseInputBeforeMicRef.current = '';
     audioChunksRef.current = [];
 
-    if (isListening || recognitionRef.current || mediaRecorderRef.current) {
+    if (wasRecording) {
       void stopListening('submit', micSessionIdRef.current);
     }
 
@@ -1158,8 +1201,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   const startListening = async () => {
-    if (isListening) return;
+    if (isListening || isRecordingActiveRef.current) return;
     const sessionId = ++micSessionIdRef.current;
+    isRecordingActiveRef.current = true;
+    if (recognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(recognitionRestartTimerRef.current);
+      recognitionRestartTimerRef.current = null;
+    }
     transcribeAbortRef.current?.abort();
     transcribeAbortRef.current = null;
     speechProducedTextRef.current = false;
@@ -1167,10 +1215,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
     audioChunksRef.current = [];
 
     try {
-      if (!navigator?.mediaDevices?.getUserMedia) return;
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        isRecordingActiveRef.current = false;
+        return;
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (micSessionIdRef.current !== sessionId) {
+      if (micSessionIdRef.current !== sessionId || !isRecordingActiveRef.current) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -1202,56 +1253,79 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRec) {
-        try {
-          const recognition = new SpeechRec();
-          recognitionRef.current = recognition;
-          recognition.lang = isAr ? 'ar-EG' : 'en-US';
-          recognition.continuous = false;
-          recognition.interimResults = true;
+        let shouldRestartRecognition = true;
 
-          recognition.onresult = (event: any) => {
-            if (micSessionIdRef.current !== sessionId) return;
-            let interim = '';
-            let finalText = '';
-            for (let i = 0; i < event.results.length; i++) {
-              const part = (event.results[i][0]?.transcript || '').trim();
-              if (!part) continue;
-              if (event.results[i].isFinal) {
-                finalText += (finalText ? ' ' : '') + part;
-              } else {
-                interim += (interim ? ' ' : '') + part;
+        const startSpeechRecognitionInstance = () => {
+          if (!isRecordingActiveRef.current || micSessionIdRef.current !== sessionId) return;
+          try {
+            const recognition = new SpeechRec();
+            recognitionRef.current = recognition;
+            recognition.lang = isAr ? 'ar-EG' : 'en-US';
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onresult = (event: any) => {
+              if (!isRecordingActiveRef.current || micSessionIdRef.current !== sessionId) return;
+              let interim = '';
+              let finalText = '';
+              for (let i = 0; i < event.results.length; i++) {
+                const part = (event.results[i][0]?.transcript || '').trim();
+                if (!part) continue;
+                if (event.results[i].isFinal) {
+                  finalText += (finalText ? ' ' : '') + part;
+                } else {
+                  interim += (interim ? ' ' : '') + part;
+                }
               }
-            }
-            const spoken = (finalText || interim).trim();
-            if (spoken) {
-              speechProducedTextRef.current = true;
-              const prefix = baseInputBeforeMicRef.current;
-              updateInputText(prefix ? `${prefix} ${spoken}` : spoken);
-            }
-          };
+              const spoken = [finalText, interim].filter(Boolean).join(' ').trim();
+              if (spoken) {
+                speechProducedTextRef.current = true;
+                const prefix = baseInputBeforeMicRef.current;
+                updateInputText(prefix ? `${prefix} ${spoken}` : spoken);
+              }
+            };
 
-          recognition.onend = () => {
-            if (
-              micSessionIdRef.current === sessionId &&
-              mediaRecorderRef.current &&
-              mediaRecorderRef.current.state === 'recording'
-            ) {
-              void stopListening('ended', sessionId);
-            }
-          };
+            recognition.onerror = (event: any) => {
+              const errCode = event?.error;
+              if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+                shouldRestartRecognition = false;
+              }
+            };
 
-          recognition.start();
-        } catch {}
+            // Keep recording active until the user explicitly stops it or sends the message.
+            // If the browser speech engine times out on silence, preserve transcribed text and restart it.
+            recognition.onend = () => {
+              if (
+                !isRecordingActiveRef.current ||
+                micSessionIdRef.current !== sessionId ||
+                !shouldRestartRecognition
+              ) {
+                return;
+              }
+              baseInputBeforeMicRef.current = latestInputRef.current.trim();
+              recognitionRestartTimerRef.current = window.setTimeout(() => {
+                recognitionRestartTimerRef.current = null;
+                startSpeechRecognitionInstance();
+              }, 150);
+            };
+
+            recognition.start();
+          } catch {}
+        };
+
+        startSpeechRecognitionInstance();
       }
     } catch {
+      isRecordingActiveRef.current = false;
       setIsListening(false);
     }
   };
 
   const handleToggleMic = () => {
-    if (isListening) void stopListening('user');
+    if (isListening || isRecordingActiveRef.current) void stopListening('user');
     else void startListening();
   };
+  handleToggleMicRef.current = handleToggleMic;
 
   const formattedRecordingTime = `${Math.floor(recordingSeconds / 60)}:${String(
     recordingSeconds % 60
@@ -1338,6 +1412,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   lang={lang}
                   onSelectFollowUp={(q) => onSendMessage(q)}
                   onEditMessage={onEditMessage}
+                  onFeedback={onMessageFeedback}
                   isLoading={isGenerating}
                 />
               ))}
@@ -1378,14 +1453,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   data-tour="chat-input"
                   className="w-full flex items-center gap-3 bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur-md px-5 sm:px-7 py-4 sm:py-4.5 rounded-[30px] border-2 border-emerald-500/40 dark:border-emerald-500/35 shadow-[0_6px_35px_rgba(16,185,129,0.22)] dark:shadow-[0_6px_40px_rgba(16,185,129,0.28)] hover:border-emerald-500/60 focus-within:border-emerald-500 focus-within:ring-4 focus-within:ring-emerald-500/20 transition-all"
                 >
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={inputText}
-                    onChange={(e) => updateInputText(e.target.value)}
-                    placeholder={isAr ? 'اسأل صحتي' : 'Ask Sehati'}
-                    className="flex-1 bg-transparent border-0 text-base sm:text-lg focus:outline-hidden text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 px-1"
-                  />
+                  <ShortcutTooltip
+                    label={isAr ? 'الكتابة في مربع السؤال' : 'Write prompt'}
+                    shortcut="\\"
+                    placement="top"
+                    className="flex-1 flex min-w-0"
+                  >
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={inputText}
+                      onChange={(e) => updateInputText(e.target.value)}
+                      placeholder={isAr ? 'اسأل صحتي' : 'Ask Sehati'}
+                      className="flex-1 w-full bg-transparent border-0 text-base sm:text-lg focus:outline-hidden text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 px-1"
+                    />
+                  </ShortcutTooltip>
 
                   {isGenerating && (
                     <span
@@ -1398,30 +1480,44 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </span>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={handleToggleMic}
-                    className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 ${
-                      isListening
-                        ? 'bg-red-500 text-white animate-pulse shadow-md ring-4 ring-red-400/40'
-                        : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10'
-                    }`}
-                    title={
+                  <ShortcutTooltip
+                    label={
                       isListening
                         ? isAr
-                          ? 'اضغط لإيقاف التسجيل'
-                          : 'Click to stop'
+                          ? 'إيقاف التسجيل'
+                          : 'Stop recording'
                         : isAr
                         ? 'تسجيل صوتي'
-                        : 'Voice input'
+                        : 'Record voice'
                     }
+                    shortcut="V"
+                    placement="top"
                   >
-                    {isListening ? (
-                      <MicOff className="w-4 h-4 animate-bounce" />
-                    ) : (
-                      <Mic className="w-4 h-4" />
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleToggleMic}
+                      className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+                        isListening
+                          ? 'bg-red-500 text-white animate-pulse shadow-md ring-4 ring-red-400/40'
+                          : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10'
+                      }`}
+                      aria-label={
+                        isListening
+                          ? isAr
+                            ? 'إيقاف التسجيل'
+                            : 'Stop recording'
+                          : isAr
+                          ? 'تسجيل صوتي'
+                          : 'Record voice'
+                      }
+                    >
+                      {isListening ? (
+                        <MicOff className="w-4 h-4 animate-bounce" />
+                      ) : (
+                        <Mic className="w-4 h-4" />
+                      )}
+                    </button>
+                  </ShortcutTooltip>
 
                   {isGenerating && onStopGenerating ? (
                     <button
@@ -1435,15 +1531,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       <Square className="w-3.5 h-3.5 fill-current" />
                     </button>
                   ) : (
-                    <button
-                      type="submit"
-                      data-tour="send-button"
-                      disabled={!inputText.trim() || isGenerating}
-                      className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-35 text-white rounded-full transition-all flex items-center justify-center cursor-pointer shrink-0 shadow-xs"
-                      title={isAr ? 'إرسال' : 'Send'}
+                    <ShortcutTooltip
+                      label={isAr ? 'إرسال الرسالة' : 'Send message'}
+                      shortcut="Enter"
+                      placement="top"
                     >
-                      <Send className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
-                    </button>
+                      <button
+                        type="submit"
+                        data-tour="send-button"
+                        disabled={!inputText.trim() || isGenerating}
+                        className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-35 text-white rounded-full transition-all flex items-center justify-center cursor-pointer shrink-0 shadow-xs"
+                        aria-label={isAr ? 'إرسال الرسالة' : 'Send message'}
+                      >
+                        <Send className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
+                      </button>
+                    </ShortcutTooltip>
                   )}
                 </div>
               </form>
@@ -1510,19 +1612,26 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 data-tour="chat-input"
                 className="w-full flex items-center gap-2.5 bg-[#f4f4f4] dark:bg-[#262626] p-3 sm:p-3.5 rounded-[28px] border-2 border-emerald-500/30 dark:border-emerald-500/25 shadow-xs focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all"
               >
-                <textarea
-                  ref={bottomTextareaRef}
-                  rows={1}
-                  value={inputText}
-                  onChange={(e) => updateInputText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    isAr
-                      ? 'اسأل صحتي...'
-                      : 'Ask Sehati...'
-                  }
-                  className="flex-1 bg-transparent border-0 resize-none text-[0.9375rem] sm:text-base focus:outline-hidden text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 px-3 py-1.5 max-h-32"
-                />
+                <ShortcutTooltip
+                  label={isAr ? 'الكتابة في مربع السؤال' : 'Write prompt'}
+                  shortcut="\\"
+                  placement="top"
+                  className="flex-1 flex min-w-0"
+                >
+                  <textarea
+                    ref={bottomTextareaRef}
+                    rows={1}
+                    value={inputText}
+                    onChange={(e) => updateInputText(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={
+                      isAr
+                        ? 'اسأل صحتي...'
+                        : 'Ask Sehati...'
+                    }
+                    className="flex-1 w-full bg-transparent border-0 resize-none text-[0.9375rem] sm:text-base focus:outline-hidden text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 px-3 py-1.5 max-h-32"
+                  />
+                </ShortcutTooltip>
 
                 {isGenerating && (
                   <span
@@ -1535,30 +1644,44 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   </span>
                 )}
 
-                <button
-                  type="button"
-                  onClick={handleToggleMic}
-                  className={`p-2 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 ${
-                    isListening
-                      ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-md ring-2 ring-red-400/50'
-                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10'
-                  }`}
-                  title={
+                <ShortcutTooltip
+                  label={
                     isListening
                       ? isAr
-                        ? 'اضغط لإيقاف التسجيل'
+                        ? 'إيقاف التسجيل'
                         : 'Stop recording'
                       : isAr
                       ? 'تسجيل صوتي'
-                      : 'Voice input'
+                      : 'Record voice'
                   }
+                  shortcut="V"
+                  placement="top"
                 >
-                  {isListening ? (
-                    <MicOff className="w-4 h-4 animate-bounce" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleToggleMic}
+                    className={`p-2 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+                      isListening
+                        ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-md ring-2 ring-red-400/50'
+                        : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10'
+                    }`}
+                    aria-label={
+                      isListening
+                        ? isAr
+                          ? 'إيقاف التسجيل'
+                          : 'Stop recording'
+                        : isAr
+                        ? 'تسجيل صوتي'
+                        : 'Record voice'
+                    }
+                  >
+                    {isListening ? (
+                      <MicOff className="w-4 h-4 animate-bounce" />
+                    ) : (
+                      <Mic className="w-4 h-4" />
+                    )}
+                  </button>
+                </ShortcutTooltip>
 
                 {isGenerating && onStopGenerating ? (
                   <button
@@ -1572,15 +1695,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
-                  <button
-                    type="submit"
-                    data-tour="send-button"
-                    disabled={!inputText.trim() || isGenerating}
-                    className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-35 text-white rounded-full transition-all flex items-center justify-center font-bold text-xs cursor-pointer shadow-xs shrink-0"
-                    title={isAr ? 'إرسال' : 'Send'}
+                  <ShortcutTooltip
+                    label={isAr ? 'إرسال الرسالة' : 'Send message'}
+                    shortcut="Enter"
+                    placement="top"
                   >
-                    <Send className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
-                  </button>
+                    <button
+                      type="submit"
+                      data-tour="send-button"
+                      disabled={!inputText.trim() || isGenerating}
+                      className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-35 text-white rounded-full transition-all flex items-center justify-center font-bold text-xs cursor-pointer shadow-xs shrink-0"
+                      aria-label={isAr ? 'إرسال الرسالة' : 'Send message'}
+                    >
+                      <Send className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
+                    </button>
+                  </ShortcutTooltip>
                 )}
               </div>
             </form>
